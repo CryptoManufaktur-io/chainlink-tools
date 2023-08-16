@@ -3,14 +3,14 @@
 
 Python script that pulls new EA versions and updates them in a compose-style yaml
 
-# Install requirements required
+### Install requirements
 ```bash
 pip install -r requirements.txt
 ```
 
-When you want to update the versions of the EAs:
-1. Clone this repo 
-2. To update the respective yaml file automatically, run python script `eaupdate.py` with arguments as follows.
+### Run the tool
+
+To update the respective yaml file automatically, run python script `eaupdate.py` with arguments as follows.
     ```bash
     # Update ea.yml with Confirmation before overwrite.
     ./eaupdate.py Latest ea.yml Confirm
