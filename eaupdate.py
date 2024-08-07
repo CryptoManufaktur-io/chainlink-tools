@@ -19,15 +19,18 @@ def get_latest_tag_version():
     exit("Could not find the latest version of adapters in release page https://github.com/smartcontractkit/external-adapters-js/releases")
 
 def get_adapter_versions(tag):
-    url = f"https://github.com/smartcontractkit/external-adapters-js/releases/tag/{tag}"
+    url = f"https://github.com/smartcontractkit/external-adapters-js/blob/{tag}/MASTERLIST.md"
     page = requests.get(url)
-    soup = BeautifulSoup(page.content, "html.parser")
+    soup = BeautifulSoup(page.content, "html.parser")    
+    table = soup.find('markdown-accessiblity-table')
+    table = table.find('table')
     adapter_versions = {}
 
-    for adapter in soup.select("div.markdown-body.my-3 h2"):
-        name_and_version = adapter.text.strip().split("@")
-        name, version = name_and_version[1].split("/")[1], name_and_version[2]
-        adapter_versions[name] = version
+    for row in table.find('tbody').find_all('tr'):
+        cells = row.find_all('td')
+        name = cells[0].text.strip()
+        version = cells[1].text.strip()
+        adapter_versions[name + '-adapter'] = version
 
     return adapter_versions
 
