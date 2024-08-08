@@ -4,6 +4,21 @@ from bs4 import BeautifulSoup
 import json
 import yaml
 import sys
+import re
+
+# Function to extract name from markdown url format
+def extract_name(name):
+    match = re.match(r'\[([^\]]+)\]\([^)]+\)', name)
+    if match:
+        return match.group(1)
+    return name
+
+# Function to extract version from markdown code text format
+def extract_version(version):
+    match = re.match(r'`([^`]+)`', version)
+    if match:
+        return match.group(1)
+    return version
 
 def get_latest_tag_version():
     url = "https://github.com/smartcontractkit/external-adapters-js/releases"
@@ -19,23 +34,57 @@ def get_latest_tag_version():
     exit("Could not find the latest version of adapters in release page https://github.com/smartcontractkit/external-adapters-js/releases")
 
 def get_adapter_versions(tag):
-    url = f"https://github.com/smartcontractkit/external-adapters-js/blob/{tag}/MASTERLIST.md"
-    page = requests.get(url)
-    soup = BeautifulSoup(page.content, "html.parser")    
-    table = soup.find('markdown-accessiblity-table')
-    table = table.find('table')
+    url = f"https://raw.githubusercontent.com/smartcontractkit/external-adapters-js/{tag}/MASTERLIST.md"
+    page = requests.get(url,timeout=5)
+    if page.status_code != 200:
+      print("Failed to fetch", url)
+      sys.exit(1)
+    md_table = BeautifulSoup(page.content, "html.parser").get_text()
+    # Get just the table
+    pattern = r'\|\s*Name\s*\|\s*Version'
+    match = re.search(pattern, md_table, re.IGNORECASE)
+
+    if match:
+        start_pos = match.start()
+        # Slice the text from the start position to the end
+        md_table = md_table[start_pos:]
+    else:
+        print("Unable to find the expected MarkDown table from the text at", url)
+        sys.exit(1)
+
+    json_table = []
+    for n, line in enumerate(md_table[1:-1].split('\n')):
+        data = {}
+        if n == 0:
+            header = [t.strip() for t in line.split('|') if t.strip()]
+            if not header:
+              print("Unable to parse the header from the markdown table at", url)
+              print("This is likely a bug in this program or because of a change in Chainlink's format")
+              sys.exit(1)
+        if n > 1:
+            values = [t.strip() for t in line.split('|')[1:-1]]
+            for col, value in zip(header, values):
+                data[col] = value
+            json_table.append(data)
     adapter_versions = {}
 
-    for row in table.find('tbody').find_all('tr'):
-        cells = row.find_all('td')
-        name = cells[0].text.strip()
-        version = cells[1].text.strip()
+    for row in json_table:
+        name = extract_name(row.get("Name", ""))
+        version = extract_version(row.get("Version", ""))
         adapter_versions[name + '-adapter'] = version
 
     return adapter_versions
 
 def get_updates(yaml_file, adapter_versions):
-    response = {'replace_strings': {}, 'to_update_image_versions': {}, 'to_retain_image_versions': {}}
+    response = {
+        'replace_strings': {},
+        'to_update_image_versions': {},
+        'to_retain_image_versions': {},
+        'services': {
+            'retain': {},
+            'update': {}
+        }
+    }
 
     with open(yaml_file, 'r') as file:
         data = yaml.safe_load(file)
@@ -47,8 +96,13 @@ def get_updates(yaml_file, adapter_versions):
             if new_version != image_version:
                 response['to_update_image_versions'][image_name] = {'current': image_version, 'new': new_version}
                 response['replace_strings'][service['image']] = service['image'].replace(image_version, new_version)
+                response['services']['update'][service_name] = image_version
+            else:
+                response['to_retain_image_versions'][image_name] = image_version
+                response['services']['retain'][service_name] = image_version
         else:
             response['to_retain_image_versions'][image_name] = image_version
+            response['services']['retain'][service_name] = image_version
 
     return response
 
@@ -90,11 +144,12 @@ if __name__ == "__main__":
         exit(1)
 
     response = get_updates(yaml_file, adapter_versions)
-    
-    print('To be retained')
+
+    num_services = len(response['services']['update']) + len(response['services']['retain'])
+    print(f"To be retained Images {len(response['to_retain_image_versions'])} From {num_services} Services")
     print(json.dumps(response['to_retain_image_versions'], indent=4, sort_keys=True))
 
-    print('\n\nTo be updated')
+    print(f"To be updated Images {len(response['to_update_image_versions'])} From {num_services} Services")
     print(json.dumps(response['to_update_image_versions'], indent=4, sort_keys=True))
 
     if len(response['to_update_image_versions']) > 0 and update_file == 'Confirm':
